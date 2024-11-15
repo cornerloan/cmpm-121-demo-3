@@ -1,3 +1,4 @@
+// deno-lint-ignore-file
 // @deno-types="npm:@types/leaflet@^1.9.14"
 import leaflet from "leaflet";
 import "leaflet/dist/leaflet.css";
@@ -13,13 +14,10 @@ const NEIGHBORHOOD_SIZE = 8;
 const CACHE_SPAWN_PROBABILITY = 0.1;
 const MAP_DATA_URL = "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
 const MAP_ATTRIBUTION =
-  `&copy; <a href="http://www.openstreetmap.org/copyright">
-    OpenStreetMap
-  </a>`;
+  `&copy; <a href="http://www.openstreetmap.org/copyright">OpenStreetMap</a>`;
 
-const MAX_COINS = 100;
+const MAX_COINS = 10;
 const MIN_COINS = 1;
-
 const CACHE_EMOJI = "🪙";
 const CACHE_EMOJI_SIZE = "32px comic-sans";
 
@@ -28,14 +26,23 @@ interface geoCacheCoinGridCell {
   ctx: CanvasRenderingContext2D | null;
   hasCache: boolean;
   coins: number;
+  coinIdentifiers: Coin[];
 }
 
 type geoCacheCoinGrid = Record<string, geoCacheCoinGridCell>;
+
+interface Coin {
+  id: string;
+  i: number;
+  j: number;
+  serial: number;
+}
+
 interface myState {
   map: leaflet.Map;
   userMarker: leaflet.Marker;
   grid: geoCacheCoinGrid;
-  heldCoins: number;
+  heldCoins: Coin[];
 }
 
 interface myUI {
@@ -51,11 +58,10 @@ function distBetween(map: leaflet.Map, latLng: leaflet.LatLng): leaflet.Point {
     zeroZeroLatLng.lng + latLng.lng,
   );
   const shift = map.latLngToLayerPoint(shiftedLatLng);
-  const dist = leaflet.point(
+  return leaflet.point(
     Math.abs(shift.x - zeroZero.x),
     Math.abs(shift.y - zeroZero.y),
   );
-  return dist;
 }
 
 function addElementToDoc<Tag extends keyof HTMLElementTagNameMap>(
@@ -71,32 +77,7 @@ function addElementToDoc<Tag extends keyof HTMLElementTagNameMap>(
   return elem;
 }
 
-function makegeoCacheCoinGrid(state: myState, ui: myUI) {
-  makeGrid(state.map, function (coords: leaflet.Point) {
-    const key = coords.toString();
-    let value: geoCacheCoinGridCell;
-    if (key in state.grid) {
-      value = state.grid[key];
-    } else {
-      value = makeGridCell(state, ui, coords, this.getTileSize());
-      state.grid[key] = value;
-    }
-    return value.canvas;
-  }, {
-    bounds: leaflet.latLngBounds(
-      leaflet.latLng(
-        state.userMarker.getLatLng().lat + TILE_DEGREES * NEIGHBORHOOD_SIZE,
-        state.userMarker.getLatLng().lng + TILE_DEGREES * NEIGHBORHOOD_SIZE,
-      ),
-      leaflet.latLng(
-        state.userMarker.getLatLng().lat - TILE_DEGREES * NEIGHBORHOOD_SIZE,
-        state.userMarker.getLatLng().lng - TILE_DEGREES * NEIGHBORHOOD_SIZE,
-      ),
-    ),
-  });
-}
-
-function makeMap(ui: myUI) {
+function makeMap(ui: myUI): leaflet.Map {
   const map = leaflet.map(ui.map, {
     center: OAKES_CLASSROOM,
     zoom: GAMEPLAY_ZOOM_LEVEL,
@@ -112,20 +93,45 @@ function makeMap(ui: myUI) {
   return map;
 }
 
+function makegeoCacheCoinGrid(state: myState): void {
+  makeGrid(
+    state.map,
+    function (this: leaflet.GridLayer, coords: leaflet.Point) {
+      const key = coords.toString();
+      if (!(key in state.grid)) {
+        state.grid[key] = makeGridCell(state, coords, this.getTileSize());
+      }
+      return state.grid[key].canvas;
+    },
+    {
+      bounds: leaflet.latLngBounds(
+        leaflet.latLng(
+          state.userMarker.getLatLng().lat + TILE_DEGREES * NEIGHBORHOOD_SIZE,
+          state.userMarker.getLatLng().lng + TILE_DEGREES * NEIGHBORHOOD_SIZE,
+        ),
+        leaflet.latLng(
+          state.userMarker.getLatLng().lat - TILE_DEGREES * NEIGHBORHOOD_SIZE,
+          state.userMarker.getLatLng().lng - TILE_DEGREES * NEIGHBORHOOD_SIZE,
+        ),
+      ),
+    },
+  );
+}
+
 function makeGrid(
   map: leaflet.Map,
   createTile: (this: leaflet.GridLayer, coords: leaflet.Point) => HTMLElement,
   options?: object,
 ): leaflet.GridLayer {
-  return (new (leafletExtend<leaflet.GridLayer>(leaflet.GridLayer, {
+  return new (leafletExtend<leaflet.GridLayer>(leaflet.GridLayer, {
     createTile,
   }))({
     tileSize: distBetween(map, leaflet.latLng(TILE_DEGREES, TILE_DEGREES)),
     ...(options || {}),
-  })).addTo(map);
+  }).addTo(map);
 }
 
-function createUserPosition(map: leaflet.Map) {
+function createUserPosition(map: leaflet.Map): leaflet.Marker {
   const marker = leaflet.marker(OAKES_CLASSROOM);
   marker.bindTooltip("You Are Here");
   marker.addTo(map);
@@ -134,29 +140,44 @@ function createUserPosition(map: leaflet.Map) {
 
 function makeGridCell(
   state: myState,
-  ui: myUI,
   coords: leaflet.Point,
   size: leaflet.Point,
-) {
+): geoCacheCoinGridCell {
   const canvas = document.createElement("canvas");
   canvas.width = size.x;
   canvas.height = size.y;
   const ctx = canvas.getContext("2d");
+
   const hasCache = luck(`has cache${coords.toString()}?`) >
     1 - CACHE_SPAWN_PROBABILITY;
   const coins = hasCache
-    ? Math.round( //this is the function for lerp
+    ? Math.round(
       MIN_COINS +
-        luck(
-            `how many coins at ${GeolocationCoordinates.toString()}?${Date.now()}`,
-          ) * //uses date.now to ensure each location has a different amount of coins
+        luck(`how many coins at ${coords.toString()}?${Date.now()}`) *
           (MAX_COINS - MIN_COINS),
     )
     : 0;
+
+  const coinIdentifiers: Coin[] = [];
   if (hasCache) {
+    for (let serial = 0; serial < coins; serial++) {
+      const coinLatLng = state.map.containerPointToLatLng(coords);
+      const { i, j } = latLngToGridIndices(coinLatLng, TILE_DEGREES);
+
+      const coin: Coin = {
+        id: `${i}_${j}_${serial}`,
+        i: i,
+        j: j,
+        serial: serial,
+      };
+
+      coinIdentifiers.push(coin);
+    }
+
     canvas.onclick = (mouseEvent) => {
-      showgeoCacheCoinCachePopup(state, ui, coords, mouseEvent);
+      showgeoCacheCoinCachePopup(state, coords, coinIdentifiers, mouseEvent);
     };
+
     if (ctx !== null) {
       ctx.save();
       ctx.translate(canvas.width / 2, canvas.height / 2);
@@ -167,13 +188,14 @@ function makeGridCell(
       ctx.restore();
     }
   }
-  return { canvas, ctx, hasCache, coins };
+
+  return { canvas, ctx, hasCache, coins, coinIdentifiers };
 }
 
 function showgeoCacheCoinCachePopup(
   state: myState,
-  ui: myUI,
   coords: leaflet.Point,
+  coinIdentifiers: Coin[],
   mouseEvent: MouseEvent,
 ) {
   const key = coords.toString();
@@ -184,87 +206,128 @@ function showgeoCacheCoinCachePopup(
       className: "map-popup",
     }, (elem) => {
       const status = addElementToDoc(elem, "p");
+      status.innerHTML = `Coins at this location:`;
+
       const takeButton = addElementToDoc(elem, "button", {
         innerHTML: "Take a coin",
         onclick: () => {
-          if (cell.coins > 0) {
+          if (cell.coins > 0 && coinIdentifiers.length > 0) {
+            const takenCoin = coinIdentifiers[0];
+            coinIdentifiers.shift();
+            state.heldCoins.push(takenCoin);
             cell.coins--;
-            state.heldCoins++;
             updatePopup();
-            updateInventoryStatus(state, ui);
+            updateInventoryStatus(state);
           }
         },
       });
+
       const leaveButton = addElementToDoc(elem, "button", {
         innerHTML: "Leave a coin",
         onclick: () => {
-          if (state.heldCoins > 0) {
-            cell.coins++;
-            state.heldCoins--;
+          if (state.heldCoins.length > 0) {
+            const coinToLeave = state.heldCoins.pop();
+            if (coinToLeave) {
+              cell.coinIdentifiers.push(coinToLeave);
+              cell.coins = cell.coinIdentifiers.length;
+            }
             updatePopup();
-            updateInventoryStatus(state, ui);
+            updateInventoryStatus(state);
           }
         },
       });
-      addElementToDoc(elem, "br");
+
       const takeAllButton = addElementToDoc(elem, "button", {
         innerHTML: "Take all",
         onclick: () => {
-          state.heldCoins += cell.coins;
+          state.heldCoins.push(...coinIdentifiers);
           cell.coins = 0;
+          coinIdentifiers.length = 0;
           updatePopup();
-          updateInventoryStatus(state, ui);
+          updateInventoryStatus(state);
         },
       });
+
       const leaveAllButton = addElementToDoc(elem, "button", {
         innerHTML: "Leave all",
         onclick: () => {
-          cell.coins += state.heldCoins;
-          state.heldCoins = 0;
+          cell.coinIdentifiers.push(...state.heldCoins);
+          cell.coins = cell.coinIdentifiers.length;
+          state.heldCoins = [];
           updatePopup();
-          updateInventoryStatus(state, ui);
+          updateInventoryStatus(state);
         },
       });
+
       const updatePopup = () => {
+        const cacheLatLng = latLngToGridIndices(
+          state.map.containerPointToLatLng(coords),
+          TILE_DEGREES,
+        );
         status.innerHTML = `
-          ${cell.coins} GeoCache Coins
+          Cache at [${cacheLatLng.i}, ${cacheLatLng.j}]<br>
+          ${cell.coins} GeoCache Coins<br>
+          ${
+          coinIdentifiers.map((coin) =>
+            `Coin at [${coin.i}, ${coin.j}], Serial: ${coin.serial}`
+          ).join("<br>")
+        }
         `;
-        takeButton.disabled = cell.coins <= 0;
-        leaveButton.disabled = state.heldCoins <= 0;
-        takeAllButton.disabled = takeButton.disabled;
-        leaveAllButton.disabled = leaveButton.disabled;
       };
       updatePopup();
     });
-    setTimeout(
-      () => state.map.openPopup(popupContent, latLng),
-      10,
-    );
+
+    setTimeout(() => state.map.openPopup(popupContent, latLng), 10);
   }
 }
 
-function updateInventoryStatus(state: myState, ui: myUI) {
-  if (state.heldCoins > 0) {
-    ui.inventorySummary.innerHTML = `
-      ${state.heldCoins} GeoCache Coins
-    `;
+function latLngToGridIndices(
+  latLng: leaflet.LatLng,
+  gridSize: number,
+): { i: number; j: number } {
+  const i = Math.floor((latLng.lng - OAKES_CLASSROOM.lng) / gridSize);
+  const j = Math.floor((latLng.lat - OAKES_CLASSROOM.lat) / gridSize);
+  return { i, j };
+}
+
+function updateInventoryStatus(state: myState) {
+  const inventorySummary = document.getElementById("inventory-total");
+  if (inventorySummary) {
+    inventorySummary.innerHTML = `Coins Collected: ${state.heldCoins.length}`;
+  }
+
+  const inventoryCoins = document.getElementById("held-coins");
+  if (inventoryCoins && state.heldCoins.length > 0) {
+    inventoryCoins.innerHTML = "";
+    state.heldCoins.forEach((coin) => {
+      const coinInfo = addElementToDoc(inventoryCoins, "p", {
+        innerHTML: `Coin from [${coin.i}, ${coin.j}], Serial: ${coin.serial}`,
+      });
+    });
   } else {
-    ui.inventorySummary.innerHTML = "0 GeoCache Coins";
+    if (inventoryCoins) {
+      inventoryCoins.innerHTML = "No coins in inventory.";
+    }
   }
 }
 
-const myUI: myUI = {
-  map: document.querySelector("#map")!,
-  inventorySummary: document.querySelector("#inventory-total")!,
-};
+document.addEventListener("DOMContentLoaded", () => {
+  const ui: myUI = {
+    map: document.getElementById("map") as HTMLElement,
+    inventorySummary: document.getElementById(
+      "inventory-summary",
+    ) as HTMLElement,
+  };
 
-const finalMap = makeMap(myUI);
+  const map = makeMap(ui);
+  const state: myState = {
+    map: map,
+    userMarker: createUserPosition(map),
+    grid: {},
+    heldCoins: [],
+  };
 
-const myState: myState = {
-  map: finalMap,
-  userMarker: createUserPosition(finalMap),
-  grid: {},
-  heldCoins: 0,
-};
+  makegeoCacheCoinGrid(state);
 
-makegeoCacheCoinGrid(myState, myUI);
+  updateInventoryStatus(state);
+});
