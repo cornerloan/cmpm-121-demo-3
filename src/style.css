@@ -92,3 +92,10 @@ button:focus-visible {
 .leaflet-tile-container {
   pointer-events: visible;
 }
+
+#controls {
+  display: flex;
+  justify-content: center;
+  gap: 1rem;
+  margin: 1rem 0;
+}

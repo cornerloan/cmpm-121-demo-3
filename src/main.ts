@@ -330,4 +330,52 @@ document.addEventListener("DOMContentLoaded", () => {
   makegeoCacheCoinGrid(state);
 
   updateInventoryStatus(state);
+
+  // Add event listeners for movement buttons
+  document.getElementById("move-north")?.addEventListener(
+    "click",
+    () => moveUserMarker(state, "north"),
+  );
+  document.getElementById("move-south")?.addEventListener(
+    "click",
+    () => moveUserMarker(state, "south"),
+  );
+  document.getElementById("move-east")?.addEventListener(
+    "click",
+    () => moveUserMarker(state, "east"),
+  );
+  document.getElementById("move-west")?.addEventListener(
+    "click",
+    () => moveUserMarker(state, "west"),
+  );
 });
+
+function moveUserMarker(state: myState, direction: string) {
+  const currentPos = state.userMarker.getLatLng();
+  let newPos: leaflet.LatLng;
+
+  // Adjust position based on the direction
+  switch (direction) {
+    case "north":
+      newPos = leaflet.latLng(currentPos.lat + TILE_DEGREES, currentPos.lng);
+      break;
+    case "south":
+      newPos = leaflet.latLng(currentPos.lat - TILE_DEGREES, currentPos.lng);
+      break;
+    case "east":
+      newPos = leaflet.latLng(currentPos.lat, currentPos.lng + TILE_DEGREES);
+      break;
+    case "west":
+      newPos = leaflet.latLng(currentPos.lat, currentPos.lng - TILE_DEGREES);
+      break;
+    default:
+      return;
+  }
+
+  // Update marker position
+  state.userMarker.setLatLng(newPos);
+  state.map.setView(newPos); // Center the map on the new position
+
+  // Optionally regenerate the grid based on new position
+  makegeoCacheCoinGrid(state);
+}
