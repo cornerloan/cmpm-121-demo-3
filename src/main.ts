@@ -153,7 +153,7 @@ function makeGridCell(
   const coins = hasCache
     ? Math.round(
       MIN_COINS +
-        luck(`how many coins at ${coords.toString()}?${Date.now()}`) *
+        luck(`how many coins at ${coords.toString()}?`) *
           (MAX_COINS - MIN_COINS),
     )
     : 0;
@@ -351,6 +351,9 @@ document.addEventListener("DOMContentLoaded", () => {
     "click",
     () => moveUserMarker(state, "west"),
   );
+  document.getElementById("reset-button")?.addEventListener("click", () => {
+    resetGame(state);
+  });
 });
 
 function moveUserMarker(state: myState, direction: string) {
@@ -371,6 +374,8 @@ function moveUserMarker(state: myState, direction: string) {
     case "west":
       newPos = leaflet.latLng(currentPos.lat, currentPos.lng - TILE_DEGREES);
       break;
+    case "reset":
+      newPos = leaflet.latLng(OAKES_CLASSROOM);
     default:
       return;
   }
@@ -428,4 +433,26 @@ function enableGeolocationTracking(state: myState) {
       }
     }
   });
+}
+
+function resetGame(state: myState) {
+  // Clear the map markers and overlays
+  state.map.eachLayer((layer) => {
+    if (!(layer instanceof leaflet.TileLayer)) {
+      state.map.removeLayer(layer);
+    }
+  });
+
+  // Reset the player's position
+  state.userMarker.remove(); // Remove the old marker
+  state.userMarker = createUserPosition(state.map); // Create and store the new marker
+  state.map.setView(OAKES_CLASSROOM, state.map.getZoom());
+
+  // Clear the inventory
+  state.heldCoins = [];
+  updateInventoryStatus(state);
+
+  // Reset grid data
+  state.grid = {};
+  makegeoCacheCoinGrid(state);
 }
