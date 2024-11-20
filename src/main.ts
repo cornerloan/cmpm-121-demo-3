@@ -331,6 +331,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
   updateInventoryStatus(state);
 
+  // Enable geolocation tracking
+  enableGeolocationTracking(state);
+
   // Add event listeners for movement buttons
   document.getElementById("move-north")?.addEventListener(
     "click",
@@ -378,4 +381,51 @@ function moveUserMarker(state: myState, direction: string) {
 
   // Optionally regenerate the grid based on new position
   makegeoCacheCoinGrid(state);
+}
+
+function enableGeolocationTracking(state: myState) {
+  let watchId: number | null = null;
+
+  const geolocationButton = document.getElementById("toggle-geolocation");
+  let isTracking = false;
+
+  geolocationButton?.addEventListener("click", () => {
+    if (isTracking) {
+      // Stop tracking
+      if (watchId !== null) {
+        navigator.geolocation.clearWatch(watchId);
+        watchId = null;
+      }
+      geolocationButton.innerText = "🌐";
+      isTracking = false;
+    } else {
+      // Start tracking
+      if (navigator.geolocation) {
+        watchId = navigator.geolocation.watchPosition(
+          (position) => {
+            const { latitude, longitude } = position.coords;
+            const newPos = leaflet.latLng(latitude, longitude);
+
+            // Update user marker and map view
+            state.userMarker.setLatLng(newPos);
+            state.map.setView(newPos);
+
+            // Optionally regenerate the grid based on new position
+            makegeoCacheCoinGrid(state);
+          },
+          (error) => {
+            console.error("Geolocation error:", error.message);
+            alert("Unable to retrieve location.");
+          },
+          {
+            enableHighAccuracy: true, // Use high accuracy if available
+          },
+        );
+        geolocationButton.innerText = "⛔ Stop Tracking";
+        isTracking = true;
+      } else {
+        alert("Geolocation is not supported by this browser.");
+      }
+    }
+  });
 }
