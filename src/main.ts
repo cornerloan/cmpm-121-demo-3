@@ -148,15 +148,12 @@ function makeGridCell(
   canvas.height = size.y;
   const ctx = canvas.getContext("2d");
 
-  const hasCache = luck(`has cache${coords.toString()}?`) >
-    1 - CACHE_SPAWN_PROBABILITY;
-  const coins = hasCache
-    ? Math.round(
-      MIN_COINS +
-        luck(`how many coins at ${coords.toString()}?`) *
-          (MAX_COINS - MIN_COINS),
-    )
-    : 0;
+  const { hasCache, coins } = getRandomizedCacheData(
+    coords,
+    CACHE_SPAWN_PROBABILITY,
+    MIN_COINS,
+    MAX_COINS,
+  );
 
   const coinIdentifiers: Coin[] = [];
   if (hasCache) {
@@ -357,34 +354,39 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 
 function moveUserMarker(state: myState, direction: string) {
-  const currentPos = state.userMarker.getLatLng();
-  let newPos: leaflet.LatLng;
+  const newPos = calculateNewPosition(state.userMarker.getLatLng(), direction);
+  if (newPos) {
+    updateUserMarkerPosition(state, newPos);
+    regenerateGridIfNeeded(state, newPos);
+  }
+}
 
-  // Adjust position based on the direction
+function calculateNewPosition(
+  currentPos: leaflet.LatLng,
+  direction: string,
+): leaflet.LatLng | null {
   switch (direction) {
     case "north":
-      newPos = leaflet.latLng(currentPos.lat + TILE_DEGREES, currentPos.lng);
-      break;
+      return leaflet.latLng(currentPos.lat + TILE_DEGREES, currentPos.lng);
     case "south":
-      newPos = leaflet.latLng(currentPos.lat - TILE_DEGREES, currentPos.lng);
-      break;
+      return leaflet.latLng(currentPos.lat - TILE_DEGREES, currentPos.lng);
     case "east":
-      newPos = leaflet.latLng(currentPos.lat, currentPos.lng + TILE_DEGREES);
-      break;
+      return leaflet.latLng(currentPos.lat, currentPos.lng + TILE_DEGREES);
     case "west":
-      newPos = leaflet.latLng(currentPos.lat, currentPos.lng - TILE_DEGREES);
-      break;
+      return leaflet.latLng(currentPos.lat, currentPos.lng - TILE_DEGREES);
     case "reset":
-      newPos = leaflet.latLng(OAKES_CLASSROOM);
+      return OAKES_CLASSROOM;
     default:
-      return;
+      return null;
   }
+}
 
-  // Update marker position
+function updateUserMarkerPosition(state: myState, newPos: leaflet.LatLng) {
   state.userMarker.setLatLng(newPos);
-  state.map.setView(newPos); // Center the map on the new position
+  state.map.setView(newPos);
+}
 
-  // Optionally regenerate the grid based on new position
+function regenerateGridIfNeeded(state: myState, newPos: leaflet.LatLng) {
   makegeoCacheCoinGrid(state);
 }
 
@@ -455,4 +457,21 @@ function resetGame(state: myState) {
   // Reset grid data
   state.grid = {};
   makegeoCacheCoinGrid(state);
+}
+
+function getRandomizedCacheData(
+  coords: leaflet.Point,
+  spawnProbability: number,
+  minCoins: number,
+  maxCoins: number,
+): { hasCache: boolean; coins: number } {
+  const hasCache =
+    luck(`has cache${coords.toString()}?`) > 1 - spawnProbability;
+  const coins = hasCache
+    ? Math.round(
+      minCoins +
+        luck(`how many coins at ${coords.toString()}?`) * (maxCoins - minCoins),
+    )
+    : 0;
+  return { hasCache, coins };
 }
